@@ -1,8 +1,9 @@
 import { solveLinear, updateRating, reviewCard } from './math.js';
 import { addDocument, deleteAllDocuments, deleteDocument, filterDocuments, getDocument, listDocuments } from './library.js';
+import { lessons as builtInGuides } from './lessons.js';
 
 const STORE = 'edugod-web-v1';
-const defaults = () => ({ history: [], attempts: [], cards: [], rating: 1000, focusMinutes: 0 });
+const defaults = () => ({ history: [], attempts: [], cards: [], rating: 1000, focusMinutes: 0, guideChecks: {} });
 let data;
 try { data = { ...defaults(), ...JSON.parse(localStorage.getItem(STORE) || '{}') }; }
 catch { data = defaults(); }
@@ -89,12 +90,6 @@ function progressView() {
   <div class="section-head"><div><h2>Review cards</h2><p>Cards from mistakes are scheduled using spaced repetition.</p></div></div>${data.cards.length ? `<div class="list">${data.cards.map((item,index) => `<div class="list-item"><span><strong>${escape(item.question)}</strong><small>Due ${formatDate(item.due || Date.now())} · Answer: ${escape(item.answer)}</small></span><div class="row"><button class="chip review-card" data-index="${index}" data-quality="2">Again</button><button class="chip review-card" data-index="${index}" data-quality="5">Got it</button></div></div>`).join('')}</div>` : empty('No cards yet', 'A missed practice question creates a review card.')}`;
 }
 
-const builtInGuides = [
-  { id: 'linear', title: 'Linear equations: quick guide', subject: 'Mathematics', text: 'A linear equation has x to the first power only. To solve ax + b = c, subtract b from both sides, then divide by a. For example, 2x + 3 = 11 becomes 2x = 8, then x = 4. Check by substituting: 2(4) + 3 = 11. If a is zero, the equation may have no solution or infinitely many solutions.' },
-  { id: 'practice', title: 'How to practice effectively', subject: 'Study skills', text: 'Try to solve each question before looking at a hint. After an error, write down the exact step where your reasoning changed. Solve a similar problem soon afterward. Review missed questions again over the following days rather than repeating only easy questions.' },
-  { id: 'exam', title: 'Checking answers under time pressure', subject: 'Exam preparation', text: 'Read the question carefully. Keep signs visible when moving terms. Estimate whether the answer is reasonable. If time permits, substitute the result back into the original equation. For a timed paper, leave a difficult question temporarily and return after easier marks are secured.' }
-];
-
 function libraryListMarkup(query) {
   const matches = filterDocuments(documents, query);
   return matches.length ? `<div class="list">${matches.map(item => `<div class="list-item"><span><strong>${escape(item.name)}</strong><small>${escape(item.subject || 'General')} · ${Math.max(1, Math.round(item.size / 1024))} KB · ${formatDate(item.addedAt)}</small>${item.notes ? `<small>${escape(item.notes)}</small>` : ''}</span><div class="row"><button class="chip open-document" data-id="${escape(item.id)}">Open</button><button class="chip download-document" data-id="${escape(item.id)}">Download</button><button class="chip delete-document" data-id="${escape(item.id)}">Delete</button></div></div>`).join('')}</div>` : empty('No matching documents', 'Import your study files to keep them available on this device.');
@@ -102,7 +97,7 @@ function libraryListMarkup(query) {
 
 function libraryView() {
   return `${card(`<h3>Your document library</h3><p>Keep study files on this device for quick access. Files are stored in this browser, not uploaded to a server.</p><form id="document-form" class="library-form"><label class="form-label" for="document-files">Choose documents</label><input class="input" id="document-files" type="file" multiple accept=".pdf,.txt,.md,.png,.jpg,.jpeg,.webp,.docx,.pptx" required><div class="grid cols-2" style="margin-top:12px"><div><label class="form-label" for="document-subject">Subject</label><input class="input" id="document-subject" maxlength="60" placeholder="Math, Science, History..."></div><div><label class="form-label" for="document-notes">Notes</label><input class="input" id="document-notes" maxlength="400" placeholder="Chapter or exam details"></div></div><button class="button" type="submit" style="margin-top:14px">Import documents</button></form><div id="document-status" role="status" aria-live="polite"></div><p class="muted" style="margin-top:12px">PDF, text, Markdown, images, Word and PowerPoint are supported up to 25 MB each. Word and PowerPoint files can be downloaded; in-app preview is available for PDF, text and images.</p>`)}`+
-  `<div class="section-head"><div><h2>Study guides</h2><p>Short guides included with EduGod.</p></div></div><div class="grid cols-3">${builtInGuides.map(guide => card(`<span class="tag">${escape(guide.subject)}</span><h3 style="margin-top:14px">${escape(guide.title)}</h3><button class="button secondary open-guide" data-id="${guide.id}" style="margin-top:12px">Read guide</button>`)).join('')}</div>`+
+  `<div class="section-head"><div><h2>Study guides</h2><p>Original lessons with a quick understanding check.</p></div></div><div class="grid cols-3">${builtInGuides.map(guide => card(`<span class="tag">${escape(guide.subject)}</span><h3 style="margin-top:14px">${escape(guide.title)}</h3><button class="button secondary open-guide" data-id="${guide.id}" style="margin-top:12px">Read guide</button>`)).join('')}</div>`+
   `<div class="section-head"><div><h2>My documents</h2><p>Search by filename, subject or notes.</p></div></div><label class="form-label" for="library-search">Search library</label><input class="input" id="library-search" placeholder="Search documents"><div id="library-list" style="margin-top:14px">${libraryListMarkup('')}</div><section id="document-viewer" class="card document-viewer" hidden></section>`;
 }
 
@@ -158,6 +153,17 @@ function render() {
 }
 
 document.addEventListener('submit', event => {
+  if (event.target.id === 'guide-quiz-form') {
+    event.preventDefault();
+    const guide = builtInGuides.find(item => item.id === event.target.dataset.id);
+    const chosen = event.target.querySelector('input[name="guide-answer"]:checked');
+    if (!guide || !chosen) return;
+    const correct = Number(chosen.value) === guide.correct;
+    data.guideChecks ||= {};
+    data.guideChecks[guide.id] = { correct, at: Date.now() };
+    save();
+    $('guide-feedback').innerHTML = `<div class="${correct ? 'success' : 'error'}">${correct ? 'Correct. ' : 'Try again after reviewing the guide. '}${escape(guide.explanation)}</div>`;
+  }
   if (event.target.id === 'document-form') {
     event.preventDefault();
     const files = Array.from($('document-files').files || []);
@@ -229,7 +235,11 @@ document.addEventListener('click', async event => {
   if (button.classList.contains('open-guide')) {
     const guide = builtInGuides.find(item => item.id === button.dataset.id);
     const viewer = $('document-viewer');
-    if (guide && viewer) { viewer.hidden = false; viewer.innerHTML = `<h3>${escape(guide.title)}</h3><p class="guide-text">${escape(guide.text)}</p><button class="button secondary" id="close-document">Close</button>`; viewer.scrollIntoView({ block: 'start' }); }
+    if (guide && viewer) {
+      viewer.hidden = false;
+      viewer.innerHTML = `<span class="tag">${escape(guide.subject)}</span><h3 style="margin-top:15px">${escape(guide.title)}</h3><p class="guide-text">${escape(guide.text)}</p><form id="guide-quiz-form" data-id="${guide.id}"><fieldset class="guide-quiz"><legend>${escape(guide.question)}</legend>${guide.options.map((option, index) => `<label><input type="radio" name="guide-answer" value="${index}" required> ${escape(option)}</label>`).join('')}</fieldset><button class="button" type="submit">Check understanding</button></form><div id="guide-feedback" role="status" aria-live="polite"></div><button class="button secondary" id="close-document" style="margin-top:16px">Close</button>`;
+      viewer.scrollIntoView({ block: 'start' });
+    }
   }
   if (button.classList.contains('open-document')) {
     try { await showDocument(button.dataset.id); } catch (error) { toast(error.message); }
