@@ -1,0 +1,1 @@
+{"name":"edugod","private":true,"type":"module","scripts":{"test":"node --test math.test.js","start":"node server.js"}}

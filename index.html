@@ -1,0 +1,30 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
+  <meta name="theme-color" content="#142a4d">
+  <meta name="description" content="EduGod: practice linear equations with verified steps and offline progress tracking.">
+  <link rel="manifest" href="./manifest.webmanifest">
+  <link rel="icon" type="image/svg+xml" href="./icon.svg">
+  <link rel="stylesheet" href="./style.css">
+  <title>EduGod • Learn with clarity</title>
+</head>
+<body>
+  <a class="skip" href="#content">Skip to content</a>
+  <div class="shell">
+    <aside class="sidebar" aria-label="Main navigation">
+      <a class="brand" href="#home"><span class="brand-mark">E</span><span>EduGod<small>Study with clarity</small></span></a>
+      <nav id="desktop-nav"></nav>
+      <div class="sidebar-note">Built for focused learning.<br>Answers are verified with exact arithmetic.</div>
+    </aside>
+    <div class="main-column">
+      <header class="topbar"><div><span class="eyebrow">YOUR STUDY SPACE</span><h1 id="page-title">Home</h1></div><span class="top-pill" id="today-date"></span></header>
+      <main id="content" tabindex="-1"></main>
+    </div>
+  </div>
+  <nav class="bottom-nav" id="mobile-nav" aria-label="Main navigation"></nav>
+  <div id="toast" role="status" aria-live="polite"></div>
+  <script type="module" src="./app.js"></script>
+</body>
+</html>
