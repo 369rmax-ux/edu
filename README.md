@@ -6,7 +6,7 @@ EduGod is an iOS 17+ SwiftUI learning app under development. This repository cur
 
 1. On macOS, install Xcode 15 or newer.
 2. Create a new iOS App project named `EduGod` with SwiftUI, Swift, and iOS 17 as the deployment target.
-3. Add the files in `EduGod/` to the app target and the files in `EduGodTests/` to the test target.
+3. Add all Swift app files except `LinearEquationSolverTests.swift`, plus `PrivacyInfo.xcprivacy`, to the app target. Add `LinearEquationSolverTests.swift` to the test target. The GitHub web upload stores these files at the repository root.
 4. Remove Xcode's generated `ContentView.swift` and app entry file to avoid duplicate types.
 5. Run the `EduGod` scheme on an iOS 17+ simulator. Run the `EduGodTests` scheme for unit tests.
 
