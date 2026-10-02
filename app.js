@@ -1,4 +1,5 @@
 import { solveLinear, updateRating, reviewCard } from './math.js';
+import { addDocument, deleteAllDocuments, deleteDocument, filterDocuments, getDocument, listDocuments } from './library.js';
 
 const STORE = 'edugod-web-v1';
 const defaults = () => ({ history: [], attempts: [], cards: [], rating: 1000, focusMinutes: 0 });
@@ -12,9 +13,11 @@ let answered = false;
 let focusSeconds = 25 * 60;
 let focusRunning = false;
 let focusLast = Date.now();
+let documents = [];
+let previewUrl = null;
 const routes = [
   ['home', 'Home', '⌂'], ['solve', 'Solve', '∑'], ['practice', 'Practice', '✎'],
-  ['progress', 'Progress', '▥'], ['more', 'More', '☷']
+  ['library', 'Library', '▤'], ['progress', 'Progress', '▥'], ['more', 'More', '☷']
 ];
 const $ = id => document.getElementById(id);
 const escape = value => String(value ?? '').replace(/[&<>"']/g, c => ({ '&':'&amp;', '<':'&lt;', '>':'&gt;', '"':'&quot;', "'":'&#39;' }[c]));
@@ -86,6 +89,47 @@ function progressView() {
   <div class="section-head"><div><h2>Review cards</h2><p>Cards from mistakes are scheduled using spaced repetition.</p></div></div>${data.cards.length ? `<div class="list">${data.cards.map((item,index) => `<div class="list-item"><span><strong>${escape(item.question)}</strong><small>Due ${formatDate(item.due || Date.now())} · Answer: ${escape(item.answer)}</small></span><div class="row"><button class="chip review-card" data-index="${index}" data-quality="2">Again</button><button class="chip review-card" data-index="${index}" data-quality="5">Got it</button></div></div>`).join('')}</div>` : empty('No cards yet', 'A missed practice question creates a review card.')}`;
 }
 
+const builtInGuides = [
+  { id: 'linear', title: 'Linear equations: quick guide', subject: 'Mathematics', text: 'A linear equation has x to the first power only. To solve ax + b = c, subtract b from both sides, then divide by a. For example, 2x + 3 = 11 becomes 2x = 8, then x = 4. Check by substituting: 2(4) + 3 = 11. If a is zero, the equation may have no solution or infinitely many solutions.' },
+  { id: 'practice', title: 'How to practice effectively', subject: 'Study skills', text: 'Try to solve each question before looking at a hint. After an error, write down the exact step where your reasoning changed. Solve a similar problem soon afterward. Review missed questions again over the following days rather than repeating only easy questions.' },
+  { id: 'exam', title: 'Checking answers under time pressure', subject: 'Exam preparation', text: 'Read the question carefully. Keep signs visible when moving terms. Estimate whether the answer is reasonable. If time permits, substitute the result back into the original equation. For a timed paper, leave a difficult question temporarily and return after easier marks are secured.' }
+];
+
+function libraryListMarkup(query) {
+  const matches = filterDocuments(documents, query);
+  return matches.length ? `<div class="list">${matches.map(item => `<div class="list-item"><span><strong>${escape(item.name)}</strong><small>${escape(item.subject || 'General')} · ${Math.max(1, Math.round(item.size / 1024))} KB · ${formatDate(item.addedAt)}</small>${item.notes ? `<small>${escape(item.notes)}</small>` : ''}</span><div class="row"><button class="chip open-document" data-id="${escape(item.id)}">Open</button><button class="chip download-document" data-id="${escape(item.id)}">Download</button><button class="chip delete-document" data-id="${escape(item.id)}">Delete</button></div></div>`).join('')}</div>` : empty('No matching documents', 'Import your study files to keep them available on this device.');
+}
+
+function libraryView() {
+  return `${card(`<h3>Your document library</h3><p>Keep study files on this device for quick access. Files are stored in this browser, not uploaded to a server.</p><form id="document-form" class="library-form"><label class="form-label" for="document-files">Choose documents</label><input class="input" id="document-files" type="file" multiple accept=".pdf,.txt,.md,.png,.jpg,.jpeg,.webp,.docx,.pptx" required><div class="grid cols-2" style="margin-top:12px"><div><label class="form-label" for="document-subject">Subject</label><input class="input" id="document-subject" maxlength="60" placeholder="Math, Science, History..."></div><div><label class="form-label" for="document-notes">Notes</label><input class="input" id="document-notes" maxlength="400" placeholder="Chapter or exam details"></div></div><button class="button" type="submit" style="margin-top:14px">Import documents</button></form><div id="document-status" role="status" aria-live="polite"></div><p class="muted" style="margin-top:12px">PDF, text, Markdown, images, Word and PowerPoint are supported up to 25 MB each. Word and PowerPoint files can be downloaded; in-app preview is available for PDF, text and images.</p>`)}`+
+  `<div class="section-head"><div><h2>Study guides</h2><p>Short guides included with EduGod.</p></div></div><div class="grid cols-3">${builtInGuides.map(guide => card(`<span class="tag">${escape(guide.subject)}</span><h3 style="margin-top:14px">${escape(guide.title)}</h3><button class="button secondary open-guide" data-id="${guide.id}" style="margin-top:12px">Read guide</button>`)).join('')}</div>`+
+  `<div class="section-head"><div><h2>My documents</h2><p>Search by filename, subject or notes.</p></div></div><label class="form-label" for="library-search">Search library</label><input class="input" id="library-search" placeholder="Search documents"><div id="library-list" style="margin-top:14px">${libraryListMarkup('')}</div><section id="document-viewer" class="card document-viewer" hidden></section>`;
+}
+
+async function loadLibrary() {
+  try {
+    documents = await listDocuments();
+    if ($('library-list')) $('library-list').innerHTML = libraryListMarkup($('library-search')?.value || '');
+  } catch (error) { if ($('document-status')) $('document-status').innerHTML = `<div class="error">${escape(error.message)}</div>`; }
+}
+
+async function showDocument(id) {
+  const item = await getDocument(id);
+  if (!item) throw new Error('Document was not found.');
+  if (previewUrl) URL.revokeObjectURL(previewUrl);
+  previewUrl = URL.createObjectURL(item.blob);
+  const viewer = $('document-viewer');
+  if (!viewer) return;
+  const actions = `<div class="row"><button class="button secondary" id="close-document">Close</button><button class="button ghost download-document" data-id="${escape(item.id)}">Download</button></div>`;
+  let content;
+  if (['txt', 'md'].includes(item.extension)) content = `<pre class="document-text">${escape((await item.blob.text()).slice(0, 250000))}</pre>`;
+  else if (['png', 'jpg', 'jpeg', 'webp'].includes(item.extension)) content = `<img class="document-image" src="${previewUrl}" alt="${escape(item.name)}">`;
+  else if (item.extension === 'pdf') content = `<iframe class="document-frame" src="${previewUrl}" title="${escape(item.name)}"></iframe><p class="muted">If the PDF does not display here, use Download to open it in your device's PDF viewer.</p>`;
+  else content = '<p class="muted">Preview is not available for this format. Download the document to open it in a compatible app.</p>';
+  viewer.innerHTML = `<h3>${escape(item.name)}</h3>${actions}${content}`;
+  viewer.hidden = false; viewer.scrollIntoView({ behavior: matchMedia('(prefers-reduced-motion: reduce)').matches ? 'instant' : 'smooth', block: 'start' });
+}
+
 function moreView() {
   return `<div class="tool-grid">${card(`<h3>Focus timer</h3><p>Take a calm 25-minute study session.</p><div class="focus-time" id="focus-time">${clock(focusSeconds)}</div><div class="row"><button class="button" id="focus-toggle">${focusRunning ? 'Pause' : 'Start focus'}</button><button class="button secondary" id="focus-reset">Reset</button></div><p class="muted" style="margin-top:12px">Completed focus minutes: ${data.focusMinutes}</p>`)}
   ${card(`<h3>Formula sheet</h3><p>Useful facts for linear equations.</p><div class="step"><span class="step-count">1</span><div><strong>ax + b = c</strong><p>x = (c − b) / a, when a ≠ 0.</p></div></div><div class="step"><span class="step-count">2</span><div><strong>Check your result</strong><p>Substitute x back into both sides of the original equation.</p></div></div>`)}</div>
@@ -108,10 +152,31 @@ function render() {
   $('page-title').textContent = routes.find(([name]) => name === current)[1];
   document.title = `EduGod • ${$('page-title').textContent}`;
   $('today-date').textContent = new Date().toLocaleDateString(undefined, { weekday:'short', month:'short', day:'numeric' });
-  $('content').innerHTML = ({ home: homeView, solve: solveView, practice: practiceView, progress: progressView, more: moreView })[current]();
+  if (previewUrl) { URL.revokeObjectURL(previewUrl); previewUrl = null; }
+  $('content').innerHTML = ({ home: homeView, solve: solveView, practice: practiceView, library: libraryView, progress: progressView, more: moreView })[current]();
+  if (current === 'library') loadLibrary();
 }
 
 document.addEventListener('submit', event => {
+  if (event.target.id === 'document-form') {
+    event.preventDefault();
+    const files = Array.from($('document-files').files || []);
+    const subject = $('document-subject').value;
+    const notes = $('document-notes').value;
+    if (!files.length) return;
+    const submit = event.target.querySelector('button[type="submit"]'); submit.disabled = true;
+    (async () => {
+      let success = 0; const errors = [];
+      for (const file of files) {
+        try { await addDocument(file, subject, notes); success++; }
+        catch (error) { errors.push(`${file.name}: ${error.message}`); }
+      }
+      submit.disabled = false;
+      $('document-status').innerHTML = `<div class="${errors.length ? 'error' : 'success'}">${success} document${success === 1 ? '' : 's'} imported.${errors.length ? `<br>${escape(errors.join(' | '))}` : ''}</div>`;
+      $('document-files').value = '';
+      await loadLibrary();
+    })();
+  }
   if (event.target.id === 'solve-form') {
     event.preventDefault();
     const question = $('equation').value.trim();
@@ -141,7 +206,7 @@ document.addEventListener('submit', event => {
   }
 });
 
-document.addEventListener('click', event => {
+document.addEventListener('click', async event => {
   const button = event.target.closest('button'); if (!button) return;
   if (button.classList.contains('example')) { $('equation').value = button.dataset.example; $('equation').focus(); }
   if (button.classList.contains('history-item')) { location.hash = '#solve'; setTimeout(() => { const field = $('equation'); if (field) { field.value = button.dataset.question; field.focus(); } }, 0); }
@@ -161,16 +226,36 @@ document.addEventListener('click', event => {
     const item = data.cards[Number(button.dataset.index)]; if (!item) return;
     Object.assign(item, reviewCard(item, Number(button.dataset.quality))); save(); render(); toast('Review schedule updated.');
   }
+  if (button.classList.contains('open-guide')) {
+    const guide = builtInGuides.find(item => item.id === button.dataset.id);
+    const viewer = $('document-viewer');
+    if (guide && viewer) { viewer.hidden = false; viewer.innerHTML = `<h3>${escape(guide.title)}</h3><p class="guide-text">${escape(guide.text)}</p><button class="button secondary" id="close-document">Close</button>`; viewer.scrollIntoView({ block: 'start' }); }
+  }
+  if (button.classList.contains('open-document')) {
+    try { await showDocument(button.dataset.id); } catch (error) { toast(error.message); }
+  }
+  if (button.classList.contains('download-document')) {
+    try {
+      const item = await getDocument(button.dataset.id); if (!item) throw new Error('Document was not found.');
+      const url = URL.createObjectURL(item.blob); const link = document.createElement('a'); link.href = url; link.download = item.name; link.click(); setTimeout(() => URL.revokeObjectURL(url), 5000);
+    } catch (error) { toast(error.message); }
+  }
+  if (button.classList.contains('delete-document')) {
+    if (!confirm('Delete this document from this browser?')) return;
+    try { await deleteDocument(button.dataset.id); await loadLibrary(); toast('Document deleted.'); }
+    catch (error) { toast(error.message); }
+  }
+  if (button.id === 'close-document') { const viewer = $('document-viewer'); if (viewer) { viewer.hidden = true; viewer.innerHTML = ''; } if (previewUrl) { URL.revokeObjectURL(previewUrl); previewUrl = null; } }
   if (button.id === 'focus-toggle') { focusRunning = !focusRunning; focusLast = Date.now(); button.textContent = focusRunning ? 'Pause' : 'Start focus'; }
   if (button.id === 'focus-reset') { focusRunning = false; focusSeconds = 25 * 60; render(); }
   if (button.id === 'export-data') {
     const file = new Blob([JSON.stringify(data, null, 2)], { type:'application/json' });
     const url = URL.createObjectURL(file); const link = document.createElement('a'); link.href = url; link.download = 'edugod-data.json'; link.click(); setTimeout(() => URL.revokeObjectURL(url), 1000);
   }
-  if (button.id === 'delete-data' && confirm('Delete all EduGod data saved in this browser?')) { data = defaults(); save(); activeSolution = null; practice = null; answered = false; render(); toast('Local data deleted.'); }
+  if (button.id === 'delete-data' && confirm('Delete all EduGod progress and library documents saved in this browser?')) { try { await deleteAllDocuments(); documents = []; data = defaults(); save(); activeSolution = null; practice = null; answered = false; render(); toast('Local data deleted.'); } catch (error) { toast(error.message); } }
 });
 
-document.addEventListener('input', event => { if (event.target.id === 'history-search') $('history-list').innerHTML = historyMarkup(event.target.value); });
+document.addEventListener('input', event => { if (event.target.id === 'history-search') $('history-list').innerHTML = historyMarkup(event.target.value); if (event.target.id === 'library-search') $('library-list').innerHTML = libraryListMarkup(event.target.value); });
 window.addEventListener('hashchange', render);
 setInterval(() => {
   if (!focusRunning) return;
